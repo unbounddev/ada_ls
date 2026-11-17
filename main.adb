@@ -4,53 +4,90 @@ with Ada.Environment_Variables;
 with Ada.Text_IO.Text_Streams;
 with Ada.Streams;
 with Parsers;
+with Ada.Containers.Vectors;
+with Ada.Characters.Latin_1;
+with Ada.Exceptions; use Ada.Exceptions;
 
 procedure Main is
+  use Ada.Characters.Latin_1;
+  use Ada.Streams;
+  package Stream_Element_Vectors is new Ada.Containers.Vectors(Positive, Stream_Element); 
   Log_File: File_Type;
   Home_Path: constant String := Ada.Environment_Variables.Value("HOME");
   Log_Path: constant String := Home_Path & "/.local/state/ada-ls";
   Log_File_Name: constant String := Log_Path & "/ada-ls.log";
-
-  type Parse_Type is abstract tagged null record;
-  type Parse_Type_Result is record
-    Result: Parse_Type'Class;
-    Rest: String;
-  end record;
   
-  function Parse(Input: String) return Parse_Type_Result is abstract;
+  Header_End : constant String := CR & LF & CR & LF; 
+  
+  Stdin_Stream: constant Ada.Text_IO.Text_Streams.Stream_Access :=
+    Ada.Text_IO.Text_Streams.Stream(Ada.Text_IO.Standard_Input);
 
-  type Header is record
-    Content_Length: Integer;
-    Content_Type: String := "application/vscode-jsonrpc; charset=utf-8";
-  end record;
+  Incomplete_Header: Exception;
+  
+  -- function Parse(Input: String) return Parse_Type_Result is abstract;
 
-  type Header_Field is record
-    Name: String;
-    Value: String;
-  end;
+  -- type Header is record
+  --   Content_Length: Integer;
+  --   Content_Type: String := "application/vscode-jsonrpc; charset=utf-8";
+  -- end record;
+
+  -- type Header_Field is record
+  --   Name: String;
+  --   Value: String;
+  -- end record;
 
   package Header_Parsers is new Parsers(Header);
+  package String_Parsers is new Parsers(String);
+  package Stream_Element_Array_Parsers is new Parsers(Stream_Element_Array);
 
-  function Get_Header return Header_Parsers.Result is
-    use Ada.Streams;
+  function To_String(Buffer: Stream_Element_Array) return String is
+    Result: String(1..Buffer'Length);
+    I: Positive := 1;
+  begin
+    for Byte of Buffer loop
+      Result(I) := Character'Val(Byte);
+      I := I + 1;
+    end loop;
+    return Result;
+  end To_String;
 
-    Stdin_Stream: constant Ada.Text_IO.Text_Streams.Stream_Access :=
-      Ada.Text_IO.Text_Streams.Stream(Ada.Text_IO.Standard_Input);
-
+  type Stream_Element_Result is record
+    Value: Stream_Element_Array;
+    Rest: Stream_Element_Array;
+  end record;
+  
+  function Get_Header return Stream_Element_Result is
+    Content: Stream_Element_Vectors.Vector;
     Buffer: Stream_Element_Array (1 .. 1024);
     Last: Stream_Element_Offset;
+    Temp_Str: String(Header_End'Range);
   begin
     loop
       Stdin_Stream.Read(Buffer, Last);
 
       exit when Last < Buffer'First;
 
+      Content.Reserve_Capacity(Content.Length + Last);
 
-
+      for I in Buffer'First .. Last loop
+        Content.Append(Buffer(I));
+        if I >= Buffer'First + Header_End'Length - 1 then
+          Temp_Str := To_String(Buffer(I-3..I));
+          if Temp_Str = Header_End then
+            declare
+              Val: Stream_Element_Array := [for B of Content => B];
+            begin
+              return (Value => Val, Rest => Buffer(I..Last));
+            end;
+            exit;
+          end if;
+        end if;
+      end loop;
     end loop;
+    raise Incomplete_Header with "Header must end with empty newline";
   end;
 
-  function Get_Content () is
+  function Get_Content return Stream_Element_Result is
   begin
     null;
   end;
