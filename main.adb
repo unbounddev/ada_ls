@@ -3,7 +3,6 @@ with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Text_IO.Text_Streams;
 with Ada.Streams;
-with Parsers;
 with Ada.Containers.Vectors;
 with Ada.Characters.Latin_1;
 with Ada.Exceptions; use Ada.Exceptions;
@@ -11,7 +10,7 @@ with Ada.Exceptions; use Ada.Exceptions;
 procedure Main is
   use Ada.Characters.Latin_1;
   use Ada.Streams;
-  package Stream_Element_Vectors is new Ada.Containers.Vectors(Positive, Stream_Element); 
+  package Stream_Element_Vectors is new Ada.Containers.Vectors(Natural, Stream_Element); 
   Log_File: File_Type;
   Home_Path: constant String := Ada.Environment_Variables.Value("HOME");
   Log_Path: constant String := Home_Path & "/.local/state/ada-ls";
@@ -23,6 +22,7 @@ procedure Main is
     Ada.Text_IO.Text_Streams.Stream(Ada.Text_IO.Standard_Input);
 
   Incomplete_Header: Exception;
+  Invalid_Request: Exception;
   
   -- function Parse(Input: String) return Parse_Type_Result is abstract;
 
@@ -36,9 +36,9 @@ procedure Main is
   --   Value: String;
   -- end record;
 
-  package Header_Parsers is new Parsers(Header);
-  package String_Parsers is new Parsers(String);
-  package Stream_Element_Array_Parsers is new Parsers(Stream_Element_Array);
+  -- package Header_Parsers is new Parsers(Header);
+  -- package String_Parsers is new Parsers(String);
+  -- package Stream_Element_Array_Parsers is new Parsers(Stream_Element_Array);
 
   function To_String(Buffer: Stream_Element_Array) return String is
     Result: String(1..Buffer'Length);
@@ -51,9 +51,30 @@ procedure Main is
     return Result;
   end To_String;
 
+  function To_String(Buffer: Stream_Element_Vectors.Vector) return String is
+    Result: String(1..Integer(Buffer.Length));
+    I: Positive := 1;
+  begin
+    for Byte of Buffer loop
+      Result(I) := Character'Val(Byte);
+      I := I + 1;
+    end loop;
+    return Result;
+  end To_String;
+  
+  function To_Vector(Buffer: Stream_Element_Array) return Stream_Element_Vectors.Vector is
+    V: Stream_Element_Vectors.Vector;
+  begin
+    V.Reserve_Capacity(Buffer'Length);
+    for Byte of Buffer loop
+      V.Append(Byte);
+    end loop;
+    return V;
+  end;
+
   type Stream_Element_Result is record
-    Value: Stream_Element_Array;
-    Rest: Stream_Element_Array;
+    Value: Stream_Element_Vectors.Vector;
+    Rest: Stream_Element_Vectors.Vector;
   end record;
   
   function Get_Header return Stream_Element_Result is
@@ -67,19 +88,14 @@ procedure Main is
 
       exit when Last < Buffer'First;
 
-      Content.Reserve_Capacity(Content.Length + Last);
+      Content.Reserve_Capacity(Ada.Containers.Count_Type(Integer(Content.Length) + Integer(Last-Buffer'First+1)));
 
       for I in Buffer'First .. Last loop
         Content.Append(Buffer(I));
         if I >= Buffer'First + Header_End'Length - 1 then
           Temp_Str := To_String(Buffer(I-3..I));
           if Temp_Str = Header_End then
-            declare
-              Val: Stream_Element_Array := [for B of Content => B];
-            begin
-              return (Value => Val, Rest => Buffer(I..Last));
-            end;
-            exit;
+              return (Value => Content, Rest => To_Vector(Buffer(I..Last)));
           end if;
         end if;
       end loop;
@@ -87,14 +103,23 @@ procedure Main is
     raise Incomplete_Header with "Header must end with empty newline";
   end;
 
-  function Get_Content return Stream_Element_Result is
-  begin
-    null;
-  end;
+  -- function Get_Content return Stream_Element_Result is
+  -- begin
+  --  null;
+  -- end;
 
   procedure Get_Request is
+    Header: Stream_Element_Result;
   begin
-    null;
+    Header := Get_Header;
+    Put_Line(Log_File, "Header:");
+    Put(Log_File, To_String(Header.Value));
+    New_Line(Log_File);
+    Put_Line(Log_File, "Rest:");
+    Put(Log_File, To_String(Header.Rest));
+    New_Line(Log_File);
+    -- Raising to prevent infinite loop due to incomplete implementation
+    raise Invalid_Request with "Request must include header and content";
   end Get_Request;
 
 begin
@@ -105,8 +130,15 @@ begin
   Put_Line(Log_File, "Starting ada-ls");
   Put_Line(Log_File, "ada-ls listening...");
 
+  loop
+    Get_Request;
+  end loop;
 
   Close(Log_File); 
+  
+  exception
+    when others =>
+      Close(Log_File); 
 end Main;
 
 -- generic
