@@ -92,7 +92,34 @@ procedure Main is
       end loop;
     end if;
     return V;
-  end;
+  end Tail;
+
+  function Ends_With(Buffer: Stream_Element_Vectors.Vector; Str: String) return Boolean is
+    use Ada.Containers;
+    use Stream_Element_Vectors;
+    Last_Index: constant Extended_Index := Buffer.Last_Index;
+    Start_Index: constant Extended_Index := Extended_Index'Max(Buffer.First_Index, Last_Index-(Str'Length-1));
+    Str_Index: Positive := Str'First;
+  begin
+
+    if Str'Length = 0 then
+      return true;
+    end if;
+
+    if Buffer.Length < Str'Length then
+      return false;
+    end if;
+
+    for I in Start_Index .. Last_Index loop
+      if Buffer(I) /= Character'Pos(Str(Str_Index)) then
+        return false;
+      end if;
+      Str_Index := Str_Index + 1;
+    end loop;
+
+    return true;
+  
+  end Ends_With;
 
   type Stream_Element_Result is record
     Value: Stream_Element_Vectors.Vector;
@@ -114,7 +141,7 @@ procedure Main is
 
       Content.Append(Buffer(Buffer'First));
       if Content.Length >= Header_End'Length then
-        if Tail(Content, Header_End'Length) = To_Vector(Header_End) then
+        if Ends_With(Content, Header_End) then
           return Content; 
         end if;
       end if;
