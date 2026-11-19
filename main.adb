@@ -24,22 +24,6 @@ procedure Main is
   Incomplete_Header: Exception;
   Invalid_Request: Exception;
   
-  -- function Parse(Input: String) return Parse_Type_Result is abstract;
-
-  -- type Header is record
-  --   Content_Length: Integer;
-  --   Content_Type: String := "application/vscode-jsonrpc; charset=utf-8";
-  -- end record;
-
-  -- type Header_Field is record
-  --   Name: String;
-  --   Value: String;
-  -- end record;
-
-  -- package Header_Parsers is new Parsers(Header);
-  -- package String_Parsers is new Parsers(String);
-  -- package Stream_Element_Array_Parsers is new Parsers(Stream_Element_Array);
-
   function To_String(Buffer: Stream_Element_Array) return String is
     Result: String(1..Buffer'Length);
     I: Positive := 1;
@@ -61,6 +45,21 @@ procedure Main is
     end loop;
     return Result;
   end To_String;
+
+  function To_String(
+    Buffer: Stream_Element_Vectors.Vector; 
+    Start_Index: Stream_Element_Vectors.Extended_Index;
+    End_Index: Stream_Element_Vectors.Extended_Index
+  ) return String is
+    Result: String(1..End_Index-Start_Index);
+    Result_Index: Positive := Result'First;
+  begin
+    for I in Start_Index..End_Index loop
+      Result(Result_Index) := Character'Val(Buffer(I));
+      Result_Index := Result_Index + 1;
+    end loop;
+    return Result;
+  end To_String;
   
   function To_Vector(Buffer: Stream_Element_Array) return Stream_Element_Vectors.Vector is
     V: Stream_Element_Vectors.Vector;
@@ -70,6 +69,29 @@ procedure Main is
       V.Append(Byte);
     end loop;
     return V;
+  end To_Vector;
+
+  function To_Vector(Str: String) return Stream_Element_Vectors.Vector is
+    V: Stream_Element_Vectors.Vector;
+  begin
+    for C of Str loop
+      V.Append(Character'Pos(C));
+    end loop;
+    return V;
+  end To_Vector;
+
+  function Tail(Buffer: Stream_Element_Vectors.Vector; Count: Integer) return Stream_Element_Vectors.Vector is
+    use Stream_Element_Vectors;
+    V: Vector;
+    Last_Index: constant Extended_Index := Buffer.Last_Index;
+    Start_Index: constant Extended_Index := Extended_Index'Max(Buffer.First_Index, Last_Index-(Count-1));
+  begin
+    if not Buffer.Is_Empty then
+      for I in Start_Index .. Last_Index loop
+        V.Append(Buffer(I));
+      end loop;
+    end if;
+    return V;
   end;
 
   type Stream_Element_Result is record
@@ -77,9 +99,11 @@ procedure Main is
     Rest: Stream_Element_Vectors.Vector;
   end record;
   
-  function Get_Header return Stream_Element_Result is
+  function Get_Header return Stream_Element_Vectors.Vector is
+    use Ada.Containers;
+    use Stream_Element_Vectors;
     Content: Stream_Element_Vectors.Vector;
-    Buffer: Stream_Element_Array (1 .. 1024);
+    Buffer: Stream_Element_Array (1 .. 1);
     Last: Stream_Element_Offset;
     Temp_Str: String(Header_End'Range);
   begin
@@ -88,17 +112,12 @@ procedure Main is
 
       exit when Last < Buffer'First;
 
-      Content.Reserve_Capacity(Ada.Containers.Count_Type(Integer(Content.Length) + Integer(Last-Buffer'First+1)));
-
-      for I in Buffer'First .. Last loop
-        Content.Append(Buffer(I));
-        if I >= Buffer'First + Header_End'Length - 1 then
-          Temp_Str := To_String(Buffer(I-3..I));
-          if Temp_Str = Header_End then
-              return (Value => Content, Rest => To_Vector(Buffer(I..Last)));
-          end if;
+      Content.Append(Buffer(Buffer'First));
+      if Content.Length >= Header_End'Length then
+        if Tail(Content, Header_End'Length) = To_Vector(Header_End) then
+          return Content; 
         end if;
-      end loop;
+      end if;
     end loop;
     raise Incomplete_Header with "Header must end with empty newline";
   end;
@@ -109,14 +128,11 @@ procedure Main is
   -- end;
 
   procedure Get_Request is
-    Header: Stream_Element_Result;
+    Header: Stream_Element_Vectors.Vector;
   begin
     Header := Get_Header;
     Put_Line(Log_File, "Header:");
-    Put(Log_File, To_String(Header.Value));
-    New_Line(Log_File);
-    Put_Line(Log_File, "Rest:");
-    Put(Log_File, To_String(Header.Rest));
+    Put(Log_File, To_String(Header));
     New_Line(Log_File);
     -- Raising to prevent infinite loop due to incomplete implementation
     raise Invalid_Request with "Request must include header and content";
@@ -137,22 +153,7 @@ begin
   Close(Log_File); 
   
   exception
-    when others =>
+    when Invalid_Request | Incomplete_Header =>
       Close(Log_File); 
 end Main;
 
--- generic
-   -- Accepts any tagged type (abstract or concrete)
---    type Element_Type is abstract tagged private;
--- package Generic_Polymorphic_Array is
-
-   -- 1. Define a class-wide access type so elements have a fixed pointer size
---   type Element_Access is access all Element_Type'Class;
-
-   -- 2. Define the array using the access type
---   type Element_Array is array (Positive range <>) of Element_Access;
-
-   -- Example procedure that dispatches dynamically on elements
---   procedure Process_All (Items : in Element_Array);
-
--- end Generic_Polymorphic_Array;
